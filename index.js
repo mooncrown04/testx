@@ -6,80 +6,52 @@ const cheerio = require('cheerio');
 const BASE_URL = 'https://chaturbate.com';
 const GET_STREAM_URL = 'https://chaturbate.com/get_edge_hls_url_ajax/';
 
-// Nuvio'nun kataloğu görmesi için manifest ayarları
+// KATALOG SORUNUNU ÇÖZEN KRİTİK MANİFEST
 const manifest = {
     id: "org.sinewix.chaturbate",
     version: "1.1.0",
     name: "Sinewix Chaturbate",
-    description: "Profesyonel Canlı Yayın Eklentisi",
-    resources: ["catalog", "meta", "stream"],
-    types: ["movie"], // Nuvio kataloğu için movie daha stabil çalışır
+    description: "Sinewix Canli Yayin Eklentisi",
+    // Nuvio'nun kataloğu tanıması için resources dizisi objelerden oluşmalı
+    resources: [
+        { name: "catalog", types: ["movie", "series"], idPrefixes: ["cb_"] },
+        { name: "meta", types: ["movie", "series"], idPrefixes: ["cb_"] },
+        { name: "stream", types: ["movie", "series"], idPrefixes: ["cb_"] }
+    ],
+    types: ["movie", "series"],
     idPrefixes: ["cb_"],
     catalogs: [
         {
-            type: "movie",
+            type: "movie", // Nuvio genellikle movie tipini ana sayfada gösterir
             id: "cb_catalog",
-            name: "Chaturbate Canlı",
+            name: "Chaturbate Canli",
             extra: [
                 { name: "skip" },
                 { name: "search", isRequired: false },
                 { 
                     name: "genre", 
                     isRequired: false, 
-                    // Gönderdiğin koddaki kategori desteği
-                    options: ["Female", "Male", "Couples", "Trans", "Teen", "Milf", "Anal", "Asian", "Latina", "Ebony"] 
+                    options: ["Female", "Male", "Couples", "Trans", "Teen", "Milf", "Anal", "Asian", "Latina"] 
                 }
             ]
         }
     ],
-    behaviorHints: { adult: true, configurable: false }
+    behaviorHints: {
+        adult: true,
+        configurable: false
+    }
 };
 
 const builder = new addonBuilder(manifest);
 
-// Gönderdiğin koddaki _parseListPage mantığı
-async function parseListPage(body) {
-    const $ = cheerio.load(body);
-    const tagRegexp = /#\S+/g;
-    const metas = [];
-
-    $('.list > li').each((i, item) => {
-        const $item = $(item);
-        const $link = $item.find('.title > a');
-        const id = $link.text().trim();
-        const subject = $item.find('.subject').text().trim();
-        const poster = $item.find('img').attr('src');
-        const tags = (subject.match(tagRegexp) || []).map(tag => tag.slice(1));
-        
-        // İzleyici sayısını çekme mantığı
-        let viewers = $item.find('.cams').text().match(/(\d+) viewers/i);
-        viewers = viewers ? viewers[1] : "0";
-
-        if (id && poster) {
-            metas.push({
-                id: `cb_${id}`,
-                name: id,
-                type: 'movie',
-                poster: poster,
-                posterShape: 'landscape',
-                background: poster,
-                description: `${viewers} İzleyici - ${tags.join(', ')}`,
-                genre: tags
-            });
-        }
-    });
-    return metas;
-}
-
-// KATALOG HANDLER (Gönderdiğin koddaki _findByPage mantığı)
+// KATALOG ÇEKİCİ (SCRAPER)
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
+    // Nuvio bazen id veya type'ı farklı gönderebilir, sadece id kontrolü yapıyoruz
     if (id !== 'cb_catalog') return { metas: [] };
 
     try {
-        const search = extra?.search || '';
-        const genre = extra?.genre || '';
-        const skip = Number(extra?.skip) || 0;
-        const page = Math.floor(skip / 12) + 1;
+        const { search, genre, skip } = extra || {};
+        const page = Math.floor((skip || 0) / 12) + 1;
 
         let url = BASE_URL;
         if (search) {
@@ -94,29 +66,50 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
 
-        const metas = await parseListPage(data);
+        const $ = cheerio.load(data);
+        const metas = [];
+
+        $('.list > li').each((i, el) => {
+            const user = $(el).find('.title > a').text().trim();
+            const img = $(el).find('img').attr('src');
+            const subject = $(el).find('.subject').text().trim();
+            const viewers = $(el).find('.cams').text().trim();
+
+            if (user && img) {
+                metas.push({
+                    id: `cb_${user}`,
+                    name: user,
+                    type: "movie",
+                    poster: img,
+                    posterShape: 'landscape',
+                    background: img,
+                    description: `${viewers} | ${subject}`
+                });
+            }
+        });
+
         return { metas };
     } catch (err) {
+        console.error("Katalog hatası:", err.message);
         return { metas: [] };
     }
 });
 
-// META HANDLER (Gönderdiğin koddaki _parseItemPage mantığı)
+// META & STREAM (AYNI KALDI)
 builder.defineMetaHandler(async ({ id }) => {
     const user = id.replace('cb_', '');
     return {
         meta: {
             id: id,
-            type: 'movie',
+            type: "movie",
             name: user,
             posterShape: 'landscape',
             background: `https://room-images.chaturbate.com/room-image/${user}.jpg`,
-            description: "Canlı Yayın - Chaturbate"
+            description: "Canli Yayini Baslat"
         }
     };
 });
 
-// STREAM HANDLER (Gönderdiğin koddaki _getStreams mantığı)
 builder.defineStreamHandler(async ({ id }) => {
     const user = id.replace('cb_', '');
     try {
@@ -128,22 +121,12 @@ builder.defineStreamHandler(async ({ id }) => {
                 'User-Agent': 'Mozilla/5.0'
             }
         });
-
         if (response.data && response.data.success) {
-            return {
-                streams: [{
-                    name: 'Sinewix HD',
-                    title: 'Yayını Başlat',
-                    url: response.data.url,
-                    live: true
-                }]
-            };
+            return { streams: [{ name: 'Sinewix HD', title: 'Izle', url: response.data.url, live: true }] };
         }
     } catch (e) {}
     return { streams: [] };
 });
 
 const PORT = process.env.PORT || 10000;
-serveHTTP(builder.getInterface(), { port: PORT }).then(() => {
-    console.log(`✅ Profesyonel Katalog Hazır: ${PORT}`);
-});
+serveHTTP(builder.getInterface(), { port: PORT });
