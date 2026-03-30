@@ -1,6 +1,7 @@
 {
   "name": "stremio-porn-nuvio",
   "version": "1.0.0",
+  "description": "Sinewix Style Scraper for Nuvio",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
