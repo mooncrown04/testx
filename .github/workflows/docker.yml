@@ -1,36 +1,40 @@
-name: Docker Build & Deploy for Nuvio
+name: Deploy Nuvio Addon to GitHub Pages
 
 on:
   push:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    
     steps:
       - name: Repo'yu çek
         uses: actions/checkout@v4
-      
-      - name: Klasör yapısını kontrol et
+
+      - name: Node.js Kurulumu
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+
+      - name: Bağımlılıkları Kur ve Derle
         run: |
-          echo "=== ROOT ==="
-          ls -la
-          echo ""
-          echo "=== DIST ==="
-          ls -la dist/
-          echo ""
-          echo "=== STATIC ==="
-          ls -la static/ 2>/dev/null || echo "static yok, oluşturulacak"
-      
-      - name: static/manifest.json oluştur (Nuvio için)
+          yarn install --frozen-lockfile
+          yarn run build || echo "Build adımı yoksa atlanıyor..."
+
+      - name: Yayın klasörünü hazırla (public)
         run: |
-          mkdir -p static
-          cat > static/manifest.json << 'EOF'
+          mkdir -p public
+          # Derlenmiş dosyaları public içine kopyala
+          cp -r dist/* public/ 2>/dev/null || cp -r . public/
+          cp -r static public/ 2>/dev/null || mkdir -p public/static
+          
+          # manifest.json dosyasını public içinde oluştur
+          cat > public/manifest.json << 'EOF'
           {
             "id": "org.nuvio.stremioporn",
             "version": "0.0.4",
@@ -62,72 +66,10 @@ jobs:
             }
           }
           EOF
-          echo "✅ manifest.json oluşturuldu"
-      
-      - name: .dockerignore oluştur
-        run: |
-          cat > .dockerignore << 'EOF'
-          .git
-          .github
-          node_modules
-          npm-debug.log
-          yarn-error.log
-          .env
-          .env.*
-          .vscode
-          .idea
-          coverage
-          *.log
-          logs
-          tmp
-          temp
-          src
-          tests
-          .eslintrc.json
-          .babelrc
-          README.md
-          Dockerfile
-          .dockerignore
-          yarn.lock
-          EOF
-      
-      - name: Dockerfile oluştur
-        run: |
-          cat > Dockerfile << 'EOF'
-          FROM node:alpine
-          WORKDIR /var/stremio_addon
-          COPY package.json yarn.lock ./
-          RUN yarn install --production --frozen-lockfile
-          COPY dist/ ./dist/
-          COPY static/ ./static/
-          EXPOSE 80
-          ENV NODE_ENV=production
-          CMD ["node", "dist/index.js"]
-          EOF
-      
-      - name: GHCR'ye giriş yap
-        uses: docker/login-action@v3
+          echo "✅ manifest.json public klasörüne yazıldı."
+
+      - name: GitHub Pages'a Yükle
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Docker imajını build et ve push et
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/stremio-porn:nuvio
-      
-      - name: Başarı mesajı
-        run: |
-          echo "✅ Build tamamlandı!"
-          echo ""
-          echo "📦 İndirmek için:"
-          echo "docker pull ghcr.io/${{ github.repository_owner }}/stremio-porn:nuvio"
-          echo ""
-          echo "🚀 Çalıştırmak için:"
-          echo "docker run -d -p 80:80 --name nuvio-addon ghcr.io/${{ github.repository_owner }}/stremio-porn:nuvio"
-          echo ""
-          echo "🔗 Nuvio'ya ekle:"
-          echo "http://SUNUCU-IP:80/manifest.json"
+          folder: public # Sadece bu klasördeki dosyalar yayınlanacak
+          branch: gh-pages # Bu dal üzerinden yayın yapılacak
