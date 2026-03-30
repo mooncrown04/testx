@@ -1,4 +1,11 @@
-./**
-!dist/**
-!static/**
-!package.json
+.git
+.github
+node_modules
+npm-debug.log
+.env
+.vscode
+.idea
+.DS_Store
+coverage
+*.log
+tmp
