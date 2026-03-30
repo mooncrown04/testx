@@ -1,15 +1,14 @@
 {
   "name": "sinewix-chaturbate",
   "version": "1.1.0",
-  "description": "Sinewix Chaturbate Addon",
+  "description": "Sinewix Addon",
   "main": "index.js",
-  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "node-fetch": "^3.3.2",
     "stremio-addon-sdk": "^1.6.10",
+    "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12"
   }
 }
