@@ -1,23 +1,15 @@
 {
-  "name": "sinewix-addon",
+  "name": "sinewix-chaturbate",
   "version": "1.1.0",
-  "description": "Sinewix Stremio eklentisi",
+  "description": "Sinewix Chaturbate Addon",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
-  "keywords": [
-    "stremio",
-    "addon",
-    "streaming",
-    "turkish",
-    "series"
-  ],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
     "node-fetch": "^3.3.2",
-    "stremio-addon-sdk": "^1.6.10"
-  },
-  "type": "module"
+    "stremio-addon-sdk": "^1.6.10",
+    "cheerio": "^1.0.0-rc.12"
+  }
 }
