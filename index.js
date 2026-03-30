@@ -1,155 +1,126 @@
-import stremio from 'stremio-addon-sdk';
+const stremio = require('stremio-addon-sdk');
 const { addonBuilder, serveHTTP } = stremio;
-import fetch from 'node-fetch';
-import * as cheerio from 'cheerio';
+const axios = require('axios');
+const cheerio = require('cheerio');
 
 const BASE_URL = 'https://chaturbate.com';
 const GET_STREAM_URL = 'https://chaturbate.com/get_edge_hls_url_ajax/';
 
-// Nuvio'nun kataloğu görmesi için türü "movie" (film) olarak değiştirdik
+// SİNEWİX İLE AYNI MANİFEST YAPISI
 const manifest = {
-    id: "org.sinewix.chaturbate",
-    version: "1.1.0",
-    name: "Sinewix Chaturbate",
-    description: "Sinewix Turkce Canli Yayin Eklentisi",
-    resources: [
-        {
-            name: "catalog",
-            types: ["movie"], // tv -> movie yapıldı
-            idPrefixes: ["cb_"]
-        },
-        {
-            name: "meta",
-            types: ["movie"], // tv -> movie yapıldı
-            idPrefixes: ["cb_"]
-        },
-        {
-            name: "stream",
-            types: ["movie"], // tv -> movie yapıldı
-            idPrefixes: ["cb_"]
-        }
-    ],
-    types: ["movie"], // tv -> movie yapıldı
-    idPrefixes: ["cb_"],
+    id: 'org.sinewix.chaturbate',
+    version: '1.1.0',
+    name: 'Sinewix Chaturbate',
+    description: 'Sinewix Canli Yayin Eklentisi',
+    // Sinewix'in kullandığı tüm kaynak tanımları
     catalogs: [
         {
-            id: "cb_popular",
-            type: "movie", // tv -> movie yapıldı
-            name: "Chaturbate Canli",
-            extra: [
-                { name: "search", isRequired: false },
-                { name: "skip" }
-            ]
+            id: 'sinewix-cb-live',
+            type: 'movie',
+            name: 'Sinewix Chaturbate Canli',
+            extra: [{ name: 'skip' }, { name: 'search', isRequired: false }]
         }
     ],
-    behaviorHints: {
-        adult: true,
-        configurable: false
-    }
+    resources: [
+        { name: 'catalog', types: ['movie'], idPrefixes: ['cb_'] },
+        { name: 'meta', types: ['movie'], idPrefixes: ['cb_'] },
+        { name: 'stream', types: ['movie'], idPrefixes: ['cb_'] }
+    ],
+    types: ['movie'],
+    idPrefixes: ['cb_']
 };
 
 const builder = new addonBuilder(manifest);
 
+// CATALOG HANDLER - Sinewix'in apiGet mantığıyla çalışır
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
-    // Sadece movie tipindeki isteklere cevap veriyoruz
-    if (id !== 'cb_popular' || type !== 'movie') {
-        return { metas: [] };
-    }
+    if (id !== 'sinewix-cb-live') return { metas: [] };
 
     try {
         const search = extra?.search || '';
-        const skip = extra?.skip || 0;
-        
-        let url = search 
-            ? `${BASE_URL}/?keywords=${encodeURIComponent(search)}` 
-            : BASE_URL;
-        
-        if (skip > 0) {
-            const page = Math.floor(skip / 12) + 1;
-            url = search ? `${url}&page=${page}` : `${url}?page=${page}`;
-        }
+        const skip = Number(extra?.skip) || 0;
+        const page = Math.floor(skip / 12) + 1;
 
-        const res = await fetch(url, {
+        let url = search 
+            ? `${BASE_URL}/?keywords=${encodeURIComponent(search)}&page=${page}` 
+            : `${BASE_URL}/?page=${page}`;
+
+        const { data } = await axios.get(url, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
-        
-        const body = await res.text();
-        const $ = cheerio.load(body);
+
+        const $ = cheerio.load(data);
         const metas = [];
 
         $('.list > li').each((i, el) => {
-            const username = $(el).find('.title > a').text().trim();
-            const poster = $(el).find('img').attr('src');
+            const user = $(el).find('.title > a').text().trim();
+            const img = $(el).find('img').attr('src');
             
-            if (username && poster) {
+            if (user && img) {
                 metas.push({
-                    id: `cb_${username}`,
-                    name: username,
-                    type: 'movie', // tv -> movie yapıldı
-                    poster: poster,
+                    id: `cb_${user}`,
+                    name: user,
+                    type: 'movie',
+                    poster: img,
                     posterShape: 'landscape',
-                    background: poster,
-                    description: $(el).find('.subject').text().trim() || "Live Cam"
+                    background: img,
+                    description: "Canli Yayin"
                 });
             }
         });
 
         return { metas };
     } catch (err) {
+        console.error('Katalog Hatasi:', err.message);
         return { metas: [] };
     }
 });
 
+// META HANDLER
 builder.defineMetaHandler(async ({ type, id }) => {
-    const username = id.replace('cb_', '');
+    const user = id.replace('cb_', '');
     return {
         meta: {
             id: id,
-            type: 'movie', // tv -> movie yapıldı
-            name: username,
-            description: "Canli Yayin - Chaturbate",
+            type: 'movie',
+            name: user,
             posterShape: 'landscape',
-            background: `https://room-images.chaturbate.com/room-image/${username}.jpg`
+            background: `https://room-images.chaturbate.com/room-image/${user}.jpg`
         }
     };
 });
 
+// STREAM HANDLER
 builder.defineStreamHandler(async ({ type, id }) => {
-    const username = id.replace('cb_', '');
+    const user = id.replace('cb_', '');
     try {
-        const response = await fetch(GET_STREAM_URL, {
-            method: 'POST',
-            body: `room_slug=${username}&bandwidth=high`,
+        const response = await axios.post(GET_STREAM_URL, `room_slug=${user}&bandwidth=high`, {
             headers: {
                 'X-Requested-With': 'XMLHttpRequest',
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'Referer': `${BASE_URL}/${username}`,
+                'Referer': `${BASE_URL}/${user}`,
                 'User-Agent': 'Mozilla/5.0'
             }
         });
-        
-        const data = await response.json();
-        if (data.success) {
+
+        if (response.data && response.data.success) {
             return {
                 streams: [{
                     name: 'Sinewix HD',
-                    title: `${username} - Canli`,
-                    url: data.url,
+                    title: 'Canli Yayini Baslat',
+                    url: response.data.url,
                     live: true
                 }]
             };
         }
-        return { streams: [] };
-    } catch (err) {
-        return { streams: [] };
+    } catch (e) {
+        console.error('Stream Hatasi');
     }
+    return { streams: [] };
 });
 
-const addonInterface = builder.getInterface();
+// SUNUCU AYARI - Sinewix'in kullandığı port ve başlatma şekli
 const PORT = process.env.PORT || 10000;
-
-serveHTTP(addonInterface, { port: PORT }).then(() => {
-    console.log(`✅ Sinewix Chaturbate (Movie Mode) hazir: http://localhost:${PORT}/manifest.json`);
+serveHTTP(builder.getInterface(), { port: PORT }).then(() => {
+    console.log(`✅ Sinewix Mimarisi Hazir: ${PORT}`);
 });
-
-export default addonInterface;
