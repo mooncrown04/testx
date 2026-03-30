@@ -16,7 +16,18 @@ jobs:
       - name: Repo'yu çek
         uses: actions/checkout@v4
       
-      - name: Nuvio manifest.json oluştur
+      - name: Klasör yapısını kontrol et
+        run: |
+          echo "=== ROOT ==="
+          ls -la
+          echo ""
+          echo "=== DIST ==="
+          ls -la dist/
+          echo ""
+          echo "=== STATIC ==="
+          ls -la static/ 2>/dev/null || echo "static yok, oluşturulacak"
+      
+      - name: static/manifest.json oluştur (Nuvio için)
         run: |
           mkdir -p static
           cat > static/manifest.json << 'EOF'
@@ -51,9 +62,9 @@ jobs:
             }
           }
           EOF
-          echo "✅ Nuvio manifest.json oluşturuldu"
+          echo "✅ manifest.json oluşturuldu"
       
-      - name: .dockerignore oluştur (orijinal yapıya uygun)
+      - name: .dockerignore oluştur
         run: |
           cat > .dockerignore << 'EOF'
           .git
@@ -79,55 +90,20 @@ jobs:
           .dockerignore
           yarn.lock
           EOF
-          echo "✅ .dockerignore oluşturuldu"
       
-      - name: Dockerfile oluştur (Yarn + Nuvio uyumlu)
+      - name: Dockerfile oluştur
         run: |
           cat > Dockerfile << 'EOF'
           FROM node:alpine
-          
           WORKDIR /var/stremio_addon
-          
-          # Yarn lock dosyasını da kopyala
           COPY package.json yarn.lock ./
-          
-          # Yarn kullanarak bağımlılıkları yükle (production)
           RUN yarn install --production --frozen-lockfile
-          
-          # Uygulama dosyalarını kopyala
           COPY dist/ ./dist/
           COPY static/ ./static/
-          
-          # Port aç
           EXPOSE 80
-          
-          # Çevre değişkenleri
           ENV NODE_ENV=production
-          
-          # Uygulamayı başlat
           CMD ["node", "dist/index.js"]
           EOF
-          echo "✅ Dockerfile oluşturuldu"
-      
-      - name: Dosyaları kontrol et
-        run: |
-          echo "=== Dockerfile ==="
-          cat Dockerfile
-          echo ""
-          echo "=== .dockerignore ==="
-          cat .dockerignore
-          echo ""
-          echo "=== Kopyalanacak dosyalar (dockerignore uygulanmadan önce) ==="
-          ls -la
-          echo ""
-          echo "=== dist/ içeriği ==="
-          ls -la dist/ 2>/dev/null || echo "❌ dist yok!"
-          echo ""
-          echo "=== static/ içeriği ==="
-          ls -la static/ 2>/dev/null || echo "❌ static yok!"
-          echo ""
-          echo "=== yarn.lock var mı? ==="
-          ls -la yarn.lock 2>/dev/null || echo "❌ yarn.lock yok!"
       
       - name: GHCR'ye giriş yap
         uses: docker/login-action@v3
@@ -141,11 +117,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/stremio-porn:latest
-            ghcr.io/${{ github.repository_owner }}/stremio-porn:nuvio
+          tags: ghcr.io/${{ github.repository_owner }}/stremio-porn:nuvio
       
-      - name: Nuvio kullanım bilgisi
+      - name: Başarı mesajı
         run: |
           echo "✅ Build tamamlandı!"
           echo ""
