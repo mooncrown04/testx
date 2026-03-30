@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: stremio-porn-nuvio
+    env: node
+    plan: free
+    region: frankfurt # Türkiye'ye en yakın ve hızlı bölge
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_VERSION
+        value: 18.0.0 # En stabil versiyon
