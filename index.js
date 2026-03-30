@@ -6,44 +6,65 @@ const cheerio = require('cheerio');
 const BASE_URL = 'https://chaturbate.com';
 const GET_STREAM_URL = 'https://chaturbate.com/get_edge_hls_url_ajax/';
 
-// SİNEWİX İLE AYNI MANİFEST YAPISI
+// PAYLAŞTIĞIN ÖRNEĞE TAM UYUMLU MANIFEST
 const manifest = {
-    id: 'org.sinewix.chaturbate',
-    version: '1.1.0',
-    name: 'Sinewix Chaturbate',
-    description: 'Sinewix Canli Yayin Eklentisi',
-    // Sinewix'in kullandığı tüm kaynak tanımları
+    id: "org.sinewix.chaturbate",
+    version: "1.1.0",
+    name: "Sinewix Chaturbate",
+    description: "Sinewix Canli Yayin ve Kategori Destekli Eklenti",
+    resources: ["catalog", "meta", "stream"],
+    types: ["movie"],
+    idPrefixes: ["cb_"],
     catalogs: [
         {
-            id: 'sinewix-cb-live',
-            type: 'movie',
-            name: 'Sinewix Chaturbate Canli',
-            extra: [{ name: 'skip' }, { name: 'search', isRequired: false }]
+            type: "movie",
+            id: "cb_catalog",
+            name: "Chaturbate Canli",
+            extra: [
+                { name: "skip" },
+                { name: "search", isRequired: false },
+                { 
+                    name: "genre", 
+                    isRequired: false, 
+                    // Chaturbate üzerindeki popüler etiketler/odalar
+                    options: ["Female", "Male", "Couples", "Trans", "Teen", "Milf", "Anal", "Asian", "Latina", "Ebony", "Big Ass", "Webcam"] 
+                }
+            ]
         }
     ],
-    resources: [
-        { name: 'catalog', types: ['movie'], idPrefixes: ['cb_'] },
-        { name: 'meta', types: ['movie'], idPrefixes: ['cb_'] },
-        { name: 'stream', types: ['movie'], idPrefixes: ['cb_'] }
-    ],
-    types: ['movie'],
-    idPrefixes: ['cb_']
+    behaviorHints: {
+        adult: true,
+        configurable: false
+    }
 };
 
 const builder = new addonBuilder(manifest);
 
-// CATALOG HANDLER - Sinewix'in apiGet mantığıyla çalışır
+// KATALOG YÖNETİCİSİ
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
-    if (id !== 'sinewix-cb-live') return { metas: [] };
+    if (id !== 'cb_catalog') return { metas: [] };
 
     try {
         const search = extra?.search || '';
+        const genre = extra?.genre || '';
         const skip = Number(extra?.skip) || 0;
         const page = Math.floor(skip / 12) + 1;
 
-        let url = search 
-            ? `${BASE_URL}/?keywords=${encodeURIComponent(search)}&page=${page}` 
-            : `${BASE_URL}/?page=${page}`;
+        let url = BASE_URL;
+
+        // 1. Arama varsa arama URL'si
+        if (search) {
+            url = `${BASE_URL}/?keywords=${encodeURIComponent(search)}&page=${page}`;
+        } 
+        // 2. Kategori (Genre) seçilmişse kategori URL'si
+        else if (genre) {
+            // Chaturbate URL yapısı: chaturbate.com/female-cams/
+            url = `${BASE_URL}/${genre.toLowerCase()}-cams/?page=${page}`;
+        } 
+        // 3. Hiçbiri yoksa ana sayfa
+        else {
+            url = `${BASE_URL}/?page=${page}`;
+        }
 
         const { data } = await axios.get(url, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -64,14 +85,13 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                     poster: img,
                     posterShape: 'landscape',
                     background: img,
-                    description: "Canli Yayin"
+                    description: $(el).find('.subject').text().trim() || "Live"
                 });
             }
         });
 
-        return { metas };
+        return { metas: metas };
     } catch (err) {
-        console.error('Katalog Hatasi:', err.message);
         return { metas: [] };
     }
 });
@@ -107,20 +127,17 @@ builder.defineStreamHandler(async ({ type, id }) => {
             return {
                 streams: [{
                     name: 'Sinewix HD',
-                    title: 'Canli Yayini Baslat',
+                    title: 'Canli Yayini Izle',
                     url: response.data.url,
                     live: true
                 }]
             };
         }
-    } catch (e) {
-        console.error('Stream Hatasi');
-    }
+    } catch (e) {}
     return { streams: [] };
 });
 
-// SUNUCU AYARI - Sinewix'in kullandığı port ve başlatma şekli
 const PORT = process.env.PORT || 10000;
 serveHTTP(builder.getInterface(), { port: PORT }).then(() => {
-    console.log(`✅ Sinewix Mimarisi Hazir: ${PORT}`);
+    console.log(`✅ Katalog Destekli Sinewix Hazir: ${PORT}`);
 });
