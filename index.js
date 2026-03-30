@@ -9,24 +9,23 @@ const manifest = {
     id: "org.sinewix.chaturbate",
     version: "1.1.0",
     name: "Sinewix Chaturbate",
-    description: "Sinewix Canli Yayin Portali",
-    // Nuvio'nun kataloğu görmesi için bu format zorunludur
+    description: "Chaturbate Canli Yayin Eklentisi",
+    // Nuvio'nun kataloğu tanıması için resources bu formatta olmalı
     resources: [
-        { name: "catalog", types: ["movie"], idPrefixes: ["cb_"] },
-        { name: "meta", types: ["movie"], idPrefixes: ["cb_"] },
-        { name: "stream", types: ["movie"], idPrefixes: ["cb_"] }
+        { name: "catalog", types: ["movie", "series"], idPrefixes: ["cb_"] },
+        { name: "meta", types: ["movie", "series"], idPrefixes: ["cb_"] },
+        { name: "stream", types: ["movie", "series"], idPrefixes: ["cb_"] }
     ],
-    types: ["movie"],
+    types: ["movie", "series"],
     idPrefixes: ["cb_"],
     catalogs: [
         {
-            type: "movie",
+            type: "movie", // Nuvio ana sayfa için movie şart
             id: "cb_catalog",
-            name: "Sinewix Chaturbate Canli",
+            name: "Sinewix: Chaturbate Canli",
             extra: [
-                { name: "skip" },
                 { name: "search", isRequired: false },
-                { name: "genre", isRequired: false, options: ["Female", "Male", "Couples", "Trans", "Teen", "Milf", "Anal"] }
+                { name: "skip", isRequired: false }
             ]
         }
     ],
@@ -38,32 +37,31 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-builder.defineCatalogHandler(async ({ type, id, extra }) => {
-    if (id !== 'cb_catalog') return { metas: [] };
+// KATALOG ÇEKME MANTIĞI
+builder.defineCatalogHandler(async (args) => {
+    if (args.id !== 'cb_catalog') return { metas: [] };
 
     try {
-        const { search, genre, skip } = extra || {};
-        const page = Math.floor((skip || 0) / 12) + 1;
+        const skip = args.extra && args.extra.skip ? args.extra.skip : 0;
+        const page = Math.floor(skip / 12) + 1;
+        
+        let url = args.extra && args.extra.search 
+            ? `${BASE_URL}/?keywords=${encodeURIComponent(args.extra.search)}&page=${page}`
+            : `${BASE_URL}/?page=${page}`;
 
-        let url = BASE_URL;
-        if (search) {
-            url = `${BASE_URL}/?keywords=${encodeURIComponent(search)}&page=${page}`;
-        } else if (genre) {
-            url = `${BASE_URL}/tag/${genre.toLowerCase()}/?page=${page}`;
-        } else {
-            url = `${BASE_URL}/?page=${page}`;
-        }
-
-        const { data } = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        const response = await axios.get(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 10000
         });
 
-        const $ = cheerio.load(data);
+        const $ = cheerio.load(response.data);
         const metas = [];
 
         $('.list > li').each((i, el) => {
             const user = $(el).find('.title > a').text().trim();
             const img = $(el).find('img').attr('src');
+            const viewers = $(el).find('.cams').text().trim();
+
             if (user && img) {
                 metas.push({
                     id: `cb_${user}`,
@@ -72,34 +70,38 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                     poster: img,
                     posterShape: 'landscape',
                     background: img,
-                    description: "Canli Yayinda"
+                    description: `${viewers} izleyici şu an canlı yayında.`
                 });
             }
         });
-        return { metas };
+
+        return { metas: metas };
     } catch (err) {
+        console.error("Katalog Hatası:", err.message);
         return { metas: [] };
     }
 });
 
-builder.defineMetaHandler(async ({ id }) => {
-    const user = id.replace('cb_', '');
+// META BİLGİSİ
+builder.defineMetaHandler(async (args) => {
+    const user = args.id.replace('cb_', '');
     return {
         meta: {
-            id: id,
+            id: args.id,
             type: "movie",
             name: user,
             posterShape: 'landscape',
             background: `https://room-images.chaturbate.com/room-image/${user}.jpg`,
-            description: "Yayini baslatmak için tiklayin."
+            description: "Canlı yayını izlemek için oynat tuşuna basın."
         }
     };
 });
 
-builder.defineStreamHandler(async ({ id }) => {
-    const user = id.replace('cb_', '');
+// YAYIN LİNKİ (STREAM)
+builder.defineStreamHandler(async (args) => {
+    const user = args.id.replace('cb_', '');
     try {
-        const response = await axios.post(GET_STREAM_URL, `room_slug=${user}&bandwidth=high`, {
+        const res = await axios.post(GET_STREAM_URL, `room_slug=${user}&bandwidth=high`, {
             headers: {
                 'X-Requested-With': 'XMLHttpRequest',
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -107,12 +109,22 @@ builder.defineStreamHandler(async ({ id }) => {
                 'User-Agent': 'Mozilla/5.0'
             }
         });
-        if (response.data && response.data.success) {
+
+        if (res.data && res.data.success) {
             return {
-                streams: [{ name: 'Sinewix HD', title: 'Izle', url: response.data.url, live: true }]
+                streams: [
+                    {
+                        name: 'Sinewix HD',
+                        title: 'Canli Yayini Baslat',
+                        url: res.data.url,
+                        live: true
+                    }
+                ]
             };
         }
-    } catch (e) {}
+    } catch (e) {
+        console.error("Yayın çekilemedi.");
+    }
     return { streams: [] };
 });
 
