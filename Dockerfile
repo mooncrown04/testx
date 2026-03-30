@@ -4,12 +4,13 @@
           FROM node:alpine
           WORKDIR /var/stremio_addon
           
-          # package.json'ı kopyala, yarn.lock varsa onu da al (yoksa hata verme)
+          # Yıldız işareti sayesinde yarn.lock yoksa bile build çökmez
           COPY package.json yarn.lock* ./
           
-          # Eğer lock dosyası varsa ona göre, yoksa normal kur
+          # Eğer yarn.lock varsa yarn ile, yoksa npm ile kurar
           RUN if [ -f yarn.lock ]; then yarn install --production --frozen-lockfile; else npm install --only=prod; fi
           
+          # Derlenmiş dosyaları kopyala
           COPY dist/ ./dist/
           COPY static/ ./static/
           
