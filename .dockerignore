@@ -1,4 +1,9 @@
-node_modules
-.git
-.github
-dist
+- name: .dockerignore oluştur
+        run: |
+          cat > .dockerignore << 'EOF'
+          node_modules
+          .git
+          .github
+          src
+          tests
+          EOF
