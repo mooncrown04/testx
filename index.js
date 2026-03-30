@@ -4,17 +4,16 @@ const http = require('http');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-const PORT = process.env.PORT || 80;
+const PORT = process.env.PORT || 10000;
 const BASE_URL = 'https://chaturbate.com';
 const GET_STREAM_URL = 'https://chaturbate.com/get_edge_hls_url_ajax/';
 
-// 1. MANIFEST (Nuvio eklentiyi buradan tanır)
 const MANIFEST = {
     "id": "org.nuvio.porn.chaturbate",
     "version": "1.0.0",
     "name": "Chaturbate Live",
-    "description": "Sinewix Style Live Cams",
-    "types": ["tv", "movie"],
+    "description": "Sinewix Style Scraper",
+    "types": ["tv"],
     "resources": ["catalog", "meta", "stream"],
     "catalogs": [
         {
@@ -25,26 +24,21 @@ const MANIFEST = {
         }
     ],
     "idPrefixes": ["cb_"],
-    "behaviorHints": { "adult": true, "configurable": false }
+    "behaviorHints": { "adult": true }
 };
 
-// 2. KAZIYICI MANTIĞI (Scraper)
 const scraper = {
-    // Sayfayı kazıyıp liste oluşturur
     async getCatalog(search = "") {
         try {
-            const url = search 
-                ? `${BASE_URL}/?keywords=${encodeURIComponent(search)}` 
-                : BASE_URL;
-            
-            const { data } = await axios.get(url, { timeout: 5000 });
+            const url = search ? `${BASE_URL}/?keywords=${encodeURIComponent(search)}` : BASE_URL;
+            const { data } = await axios.get(url, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            });
             const $ = cheerio.load(data);
             const metas = [];
-
             $('.list > li').each((i, el) => {
                 const id = $(el).find('.title > a').text().trim();
                 const poster = $(el).find('img').attr('src');
-                
                 if (id && poster) {
                     metas.push({
                         id: `cb_${id}`,
@@ -53,66 +47,49 @@ const scraper = {
                         poster: poster,
                         posterShape: 'landscape',
                         background: poster,
-                        description: $(el).find('.subject').text().trim() || "Live Cam"
+                        description: $(el).find('.subject').text().trim() || "Live"
                     });
                 }
             });
             return metas;
-        } catch (e) {
+        } catch (e) { 
             console.error("Scraper Hatası:", e.message);
-            return [];
+            return []; 
         }
     },
-
-    // Canlı yayın linkini (m3u8) çözer
     async getStream(id) {
         try {
             const realId = id.replace('cb_', '');
-            const { data } = await axios.post(GET_STREAM_URL, 
-                `room_slug=${realId}&bandwidth=high`, 
-                {
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'Referer': `${BASE_URL}/${realId}`
-                    }
+            const { data } = await axios.post(GET_STREAM_URL, `room_slug=${realId}&bandwidth=high`, {
+                headers: { 
+                    'X-Requested-With': 'XMLHttpRequest', 
+                    'Content-Type': 'application/x-www-form-urlencoded', 
+                    'Referer': `${BASE_URL}/${realId}`,
+                    'User-Agent': 'Mozilla/5.0'
                 }
-            );
-
-            if (data.success && data.room_status === 'public') {
-                return [{
-                    title: 'HD Canlı Yayın',
-                    url: data.url, // Doğrudan m3u8 linki
-                    live: true
-                }];
-            }
-            return [];
-        } catch (e) {
-            return [];
-        }
+            });
+            return data.success ? [{ title: 'HD Live', url: data.url, live: true }] : [];
+        } catch (e) { return []; }
     }
 };
 
-// 3. HTTP SUNUCU (Nuvio İsteklerini Karşılar)
-const server = http.createServer(async (req, res) => {
-    // CORS Başlıkları (Nuvio'nun erişimi için ŞART)
+http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Content-Type', 'application/json');
-
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-    const url = req.url;
-    const parts = url.split('/').filter(Boolean);
+    // URL'yi parçala ve .json uzantısını temizle
+    const cleanUrl = req.url.split('?')[0].replace('.json', '');
+    const parts = cleanUrl.split('/').filter(Boolean);
 
     try {
-        // Manifest: /manifest.json
-        if (url === '/' || url === '/manifest.json') {
+        // Manifest
+        if (cleanUrl === '/' || cleanUrl === '/manifest') {
             return res.end(JSON.stringify(MANIFEST));
         }
 
-        // Katalog: /catalog/tv/cb_popular.json
+        // Katalog (/catalog/tv/cb_popular)
         if (parts[0] === 'catalog') {
             const urlObj = new URL(req.url, `http://${req.headers.host}`);
             const search = urlObj.searchParams.get('search') || "";
@@ -120,33 +97,22 @@ const server = http.createServer(async (req, res) => {
             return res.end(JSON.stringify({ metas: results }));
         }
 
-        // Meta (Detay): /meta/tv/cb_id.json
+        // Meta (/meta/tv/cb_id)
         if (parts[0] === 'meta') {
-            const id = parts[2].replace('.json', '').replace('cb_', '');
-            return res.end(JSON.stringify({
-                meta: {
-                    id: `cb_${id}`,
-                    name: id,
-                    type: 'tv',
-                    description: "Canlı Yayın"
-                }
-            }));
+            const id = parts[2].replace('cb_', '');
+            return res.end(JSON.stringify({ meta: { id: `cb_${id}`, name: id, type: 'tv', posterShape: 'landscape' } }));
         }
 
-        // Stream (Oynat): /stream/tv/cb_id.json
+        // Stream (/stream/tv/cb_id)
         if (parts[0] === 'stream') {
-            const id = parts[2].replace('.json', '');
+            const id = parts[2];
             const streams = await scraper.getStream(id);
             return res.end(JSON.stringify({ streams }));
         }
 
-        res.writeHead(404); res.end(JSON.stringify({ error: "Not Found" }));
-    } catch (err) {
-        res.end(JSON.stringify({ metas: [], streams: [], error: err.message }));
+        res.writeHead(404); res.end();
+    } catch (e) { 
+        console.error("İstek Hatası:", e.message);
+        res.end(JSON.stringify({ metas: [] })); 
     }
-});
-
-server.listen(PORT, () => {
-    console.log(`Eklenti Aktif! Port: ${PORT}`);
-    console.log(`Nuvio Linki: /manifest.json`);
-});
+}).listen(PORT, () => console.log(`Sinewix Mode Active on ${PORT}`));
