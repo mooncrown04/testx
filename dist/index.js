@@ -12,49 +12,58 @@ var _PornClient = _interopRequireDefault(require("./PornClient"));
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 function _asyncToGenerator(fn) { return function () { var self = this, args = arguments; return new Promise(function (resolve, reject) { var gen = fn.apply(self, args); function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { Promise.resolve(value).then(_next, _throw); } } function _next(value) { step("next", value); } function _throw(err) { step("throw", err); } _next(); }); }; }
 
-const ID = process.env.STREMIO_PORN_ID || 'stremio_porn';
-const ENDPOINT = process.env.STREMIO_PORN_ENDPOINT || 'https://testx-mysk.onrender.com';
 const PORT = process.env.PORT || '80';
 
-// Nuvio'nun sol menüde göstereceği kataloglar
+// Nuvio için Katalog Tanımları
 const CATALOGS = _PornClient.default.ADAPTERS.map(adapter => ({
   type: 'movie',
-  id: `catalog_${adapter.ID}`,
+  id: `catalog_${adapter.name}`, // Adaptörün teknik adını kullanıyoruz (PornHub, YouPorn vb.)
   name: `${adapter.DISPLAY_NAME}`,
   extra: [{ name: 'search', isRequired: false }, { name: 'skip', isRequired: false }]
 }));
 
 const MANIFEST = {
-  id: ID,
+  id: process.env.STREMIO_PORN_ID || 'stremio_porn',
   name: 'Porn Plus',
   version: _package.default.version,
-  description: 'Nuvio & Stremio Compatible Addon',
+  description: 'Nuvio & Stremio %100 Compatible',
   types: ['movie'],
   idProperty: _PornClient.default.ID,
-  resources: ['catalog', 'meta', 'stream'], // Nuvio için en kritik satır
+  resources: ['catalog', 'meta', 'stream'],
   catalogs: CATALOGS,
-  endpoint: `${ENDPOINT}/stremioget/stremio/v1`
+  endpoint: `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'testx-mysk.onrender.com'}/stremioget/stremio/v1`
 };
 
 function makeCatalogMethod(client) {
   return function (request, cb) {
     _asyncToGenerator(function* () {
       try {
-        const adapterId = request.id.replace('catalog_', '');
-        const response = yield client.invokeMethod('meta.search', {
-          query: {
-            type: 'movie',
-            [_PornClient.default.ID]: adapterId,
-            search: (request.extra && request.extra.search) ? request.extra.search : ''
-          },
-          skip: (request.extra && request.extra.skip) ? request.extra.skip : 0
-        });
+        const adapterName = request.id.replace('catalog_', '');
+        
+        // KRİTİK NOKTA: PornClient.js'deki normalizeRequest'i kandırıyoruz.
+        // İstemi 'sort' (sıralama) parametresi gibi gönderiyoruz ki adaptörü bulabilsin.
+        const fakeRequest = {
+          query: { type: 'movie' },
+          sort: { [`popularities.porn.${adapterName}`]: -1 }, // PornClient.js'deki SORT_PROP_PREFIX
+          skip: (request.extra && request.extra.skip) ? parseInt(request.extra.skip) : 0,
+          limit: 20
+        };
+
+        if (request.extra && request.extra.search) {
+          fakeRequest.query.search = request.extra.search;
+        }
+
+        const response = yield client.invokeMethod('meta.search', fakeRequest);
         cb(null, response);
-      } catch (err) { cb(err); }
+      } catch (err) {
+        console.error("Katalog Hatası:", err);
+        cb(null, { metas: [] }); // Hata olsa bile Nuvio kilitlenmesin diye boş dönüyoruz
+      }
     })();
   };
 }
 
+// Diğer standart metodlar
 function makeMethod(client, methodName) {
   return function (request, cb) {
     _asyncToGenerator(function* () {
@@ -82,7 +91,6 @@ const methods = {
 let addon = new _stremioAddons.default.Server(methods, MANIFEST);
 
 let server = _http.default.createServer((req, res) => {
-  // CORS Ayarları (Nuvio'nun erişebilmesi için şart)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Content-Type', 'application/json');
@@ -92,4 +100,6 @@ let server = _http.default.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => console.log(`Addon listening on ${PORT}`));
+server.listen(PORT, () => console.log(`%100 Uyumlu Sunucu Port ${PORT} üzerinde aktif.`));
+
+exports.default = server;
