@@ -5,71 +5,79 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 const PORT = process.env.PORT || 10000;
-const BASE_URL = 'https://chaturbate.com';
-const GET_STREAM_URL = 'https://chaturbate.com/get_edge_hls_url_ajax/';
+const BASE_URL = 'https://www.pornhub.com';
 
 const MANIFEST = {
-    "id": "org.nuvio.porn.chaturbate",
+    "id": "org.nuvio.pornhub.v4",
     "version": "1.0.0",
-    "name": "Chaturbate Live",
-    "description": "Sinewix Style Scraper",
-    "types": ["tv"],
+    "name": "Pornhub Sinewix",
+    "description": "Sinewix Style Pornhub Addon",
+    "types": ["movie"],
     "resources": ["catalog", "meta", "stream"],
     "catalogs": [
         {
-            "type": "tv",
-            "id": "cb_popular",
-            "name": "Chaturbate Canlı",
+            "type": "movie",
+            "id": "ph_trending",
+            "name": "Pornhub Trendler",
             "extra": [{ "name": "search", "isRequired": false }]
         }
     ],
-    "idPrefixes": ["cb_"],
+    "idPrefixes": ["ph_"],
     "behaviorHints": { "adult": true }
 };
 
 const scraper = {
     async getCatalog(search = "") {
         try {
-            const url = search ? `${BASE_URL}/?keywords=${encodeURIComponent(search)}` : BASE_URL;
+            const url = search 
+                ? `${BASE_URL}/video/search?search=${encodeURIComponent(search)}` 
+                : `${BASE_URL}/video?o=tr`; // Trending (Trendler)
+            
             const { data } = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                timeout: 8000
             });
+            
             const $ = cheerio.load(data);
             const metas = [];
-            $('.list > li').each((i, el) => {
-                const id = $(el).find('.title > a').text().trim();
-                const poster = $(el).find('img').attr('src');
-                if (id && poster) {
-                    metas.push({
-                        id: `cb_${id}`,
-                        name: id,
-                        type: 'tv',
-                        poster: poster,
-                        posterShape: 'landscape',
-                        background: poster,
-                        description: $(el).find('.subject').text().trim() || "Live"
-                    });
+
+            // Pornhub'daki video listeleme seçicileri
+            $('.videoJsRelated, .pcVideoListItem').each((i, el) => {
+                const $el = $(el);
+                const title = $el.find('.title a').text().trim();
+                const link = $el.find('.title a').attr('href');
+                const thumb = $el.find('img').attr('data-mediumthumb') || $el.find('img').attr('src');
+                
+                if (title && link) {
+                    const id = link.match(/view_key=([^&]+)/);
+                    if (id) {
+                        metas.push({
+                            id: `ph_${id[1]}`,
+                            name: title,
+                            type: 'movie',
+                            poster: thumb,
+                            posterShape: 'landscape',
+                            background: thumb
+                        });
+                    }
                 }
             });
             return metas;
-        } catch (e) { 
+        } catch (e) {
             console.error("Scraper Hatası:", e.message);
-            return []; 
+            return [];
         }
     },
+
     async getStream(id) {
-        try {
-            const realId = id.replace('cb_', '');
-            const { data } = await axios.post(GET_STREAM_URL, `room_slug=${realId}&bandwidth=high`, {
-                headers: { 
-                    'X-Requested-With': 'XMLHttpRequest', 
-                    'Content-Type': 'application/x-www-form-urlencoded', 
-                    'Referer': `${BASE_URL}/${realId}`,
-                    'User-Agent': 'Mozilla/5.0'
-                }
-            });
-            return data.success ? [{ title: 'HD Live', url: data.url, live: true }] : [];
-        } catch (e) { return []; }
+        const videoId = id.replace('ph_', '');
+        // Pornhub direkt video linki vermek yerine sayfada oynatır. 
+        // Nuvio'nun webview üzerinden açması için sayfa linkini gönderiyoruz.
+        return [{
+            title: 'Hemen İzle',
+            url: `${BASE_URL}/view_video.php?viewkey=${videoId}`,
+            externalUrl: `${BASE_URL}/view_video.php?viewkey=${videoId}`
+        }];
     }
 };
 
@@ -77,19 +85,20 @@ http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Content-Type', 'application/json');
+
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-    // URL'yi parçala ve .json uzantısını temizle
-    const cleanUrl = req.url.split('?')[0].replace('.json', '');
-    const parts = cleanUrl.split('/').filter(Boolean);
+    // URL'yi temizle (Sondaki .json'u ve parametreleri ayıkla)
+    const urlPath = req.url.split('?')[0].replace('.json', '');
+    const parts = urlPath.split('/').filter(Boolean);
 
     try {
-        // Manifest
-        if (cleanUrl === '/' || cleanUrl === '/manifest') {
+        // 1. Manifest
+        if (urlPath === '/' || urlPath === '/manifest') {
             return res.end(JSON.stringify(MANIFEST));
         }
 
-        // Katalog (/catalog/tv/cb_popular)
+        // 2. Katalog
         if (parts[0] === 'catalog') {
             const urlObj = new URL(req.url, `http://${req.headers.host}`);
             const search = urlObj.searchParams.get('search') || "";
@@ -97,13 +106,13 @@ http.createServer(async (req, res) => {
             return res.end(JSON.stringify({ metas: results }));
         }
 
-        // Meta (/meta/tv/cb_id)
+        // 3. Meta (Gerekli ama basit tutuyoruz)
         if (parts[0] === 'meta') {
-            const id = parts[2].replace('cb_', '');
-            return res.end(JSON.stringify({ meta: { id: `cb_${id}`, name: id, type: 'tv', posterShape: 'landscape' } }));
+            const id = parts[2];
+            return res.end(JSON.stringify({ meta: { id, type: 'movie', name: "Pornhub Video" } }));
         }
 
-        // Stream (/stream/tv/cb_id)
+        // 4. Stream
         if (parts[0] === 'stream') {
             const id = parts[2];
             const streams = await scraper.getStream(id);
@@ -111,8 +120,7 @@ http.createServer(async (req, res) => {
         }
 
         res.writeHead(404); res.end();
-    } catch (e) { 
-        console.error("İstek Hatası:", e.message);
-        res.end(JSON.stringify({ metas: [] })); 
+    } catch (e) {
+        res.end(JSON.stringify({ metas: [] }));
     }
-}).listen(PORT, () => console.log(`Sinewix Mode Active on ${PORT}`));
+}).listen(PORT, () => console.log(`Sinewix Aktif: ${PORT}`));
