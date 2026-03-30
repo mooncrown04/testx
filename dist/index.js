@@ -1,116 +1,99 @@
 "use strict";
 
-Object.defineProperty(exports, "__esModule", { value: true });
+const http = require('http');
+const PornClient = require('./PornClient').default;
 
-var _http = _interopRequireDefault(require("http"));
-var _serveStatic = _interopRequireDefault(require("serve-static"));
-var _PornClient = _interopRequireDefault(require("./PornClient"));
+const PORT = process.env.PORT || 80;
+const client = new PornClient({ cache: '1' });
 
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-function _asyncToGenerator(fn) { return function () { var self = this, args = arguments; return new Promise(function (resolve, reject) { var gen = fn.apply(self, args); function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { Promise.resolve(value).then(_next, _throw); } } function _next(value) { step("next", value); } function _throw(err) { step("throw", err); } _next(); }); }; }
-
-const PORT = process.env.PORT || '80';
-
-// Nuvio'nun kabul ettiği v4 Manifestosu
+// Nuvio'nun istediği Modern Manifest
 const MANIFEST = {
-  "id": "org.nuvio.stremioporn",
-  "version": "0.0.6",
-  "name": "Stremio Porn",
-  "description": "Adult content for Nuvio",
-  "types": ["movie"],
-  "catalogs": [
+  id: "org.nuvio.stremioporn",
+  version: "1.0.0",
+  name: "Stremio Porn",
+  description: "Adult content for Nuvio",
+  types: ["movie"],
+  resources: ["catalog", "stream", "meta"],
+  catalogs: [
     {
-      "type": "movie",
-      "id": "stremioporn",
-      "name": "Adult Videos",
-      "extra": [
-        {"name": "search", "isRequired": false},
-        {"name": "skip", "isRequired": false}
-      ]
+      type: "movie",
+      id: "stremioporn",
+      name: "Adult Videos",
+      extra: [{ name: "search" }, { name: "skip" }]
     }
   ],
-  "resources": ["catalog", "stream", "meta"],
-  "idPrefixes": ["porn_id"],
-  "behaviorHints": { "adult": true }
+  idPrefixes: ["porn_id"],
+  behaviorHints: { adult: true }
 };
 
-let client = new _PornClient.default({ cache: '1' });
-
-const server = _http.default.createServer((req, res) => {
-  // CORS & JSON Headers
+const server = http.createServer(async (req, res) => {
+  // CORS Ayarları (Nuvio için kritik)
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Content-Type', 'application/json');
 
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
 
   const url = req.url;
+  console.log("Gelen İstek:", url);
 
-  // 1. MANIFEST İSTEĞİ
-  if (url.endsWith('manifest.json')) {
-    res.end(JSON.stringify(MANIFEST));
-    return;
-  }
+  try {
+    // 1. Manifest
+    if (url === '/' || url === '/manifest.json') {
+      return res.end(JSON.stringify(MANIFEST));
+    }
 
-  // 2. KATALOG İSTEĞİ (Nuvio buradan videoları çeker)
-  if (url.includes('/catalog/movie/stremioporn')) {
-    _asyncToGenerator(function* () {
-      try {
-        // Nuvio'dan gelen search veya skip parametrelerini ayıkla
-        const searchMatch = url.match(/search=([^&]+)/);
-        const skipMatch = url.match(/skip=(\d+)/);
-        
-        const query = {
-          type: 'movie',
-          search: searchMatch ? decodeURIComponent(searchMatch[1]) : ''
-        };
+    // 2. Katalog (Nuvio videoları buradan çeker)
+    if (url.includes('/catalog/movie/stremioporn')) {
+      const searchMatch = url.match(/search=([^&]+)/);
+      const skipMatch = url.match(/skip=(\d+)/);
+      
+      const results = await client.invokeMethod('meta.search', {
+        query: { 
+          type: 'movie', 
+          search: searchMatch ? decodeURIComponent(searchMatch[1]) : '' 
+        },
+        sort: { 'popularities.porn.PornHub': -1 }, // PornHub'ı varsayılan yaptık
+        skip: skipMatch ? parseInt(skipMatch[1]) : 0
+      });
 
-        // PornClient'a "PornHub" popülerleri getir diyoruz
-        const results = yield client.invokeMethod('meta.search', {
-          query: query,
-          sort: { 'popularities.porn.PornHub': -1 },
-          skip: skipMatch ? parseInt(skipMatch[1]) : 0
-        });
+      // Nuvio'nun beklediği v4 formatı
+      return res.end(JSON.stringify({ metas: results || [] }));
+    }
 
-        // Nuvio'nun beklediği v4 formatı: { metas: [...] }
-        res.end(JSON.stringify({ metas: results || [] }));
-      } catch (err) {
-        res.end(JSON.stringify({ metas: [] }));
-      }
-    })();
-    return;
-  }
+    // 3. Meta Detay
+    if (url.includes('/meta/movie/')) {
+      const id = url.split('/').pop().replace('.json', '');
+      const result = await client.invokeMethod('meta.get', { 
+        query: { porn_id: id } 
+      });
+      return res.end(JSON.stringify({ meta: result }));
+    }
 
-  // 3. META (DETAY) İSTEĞİ
-  if (url.includes('/meta/movie/')) {
-    _asyncToGenerator(function* () {
-      try {
-        const id = url.split('/').pop().replace('.json', '');
-        const result = yield client.invokeMethod('meta.get', { query: { porn_id: id } });
-        res.end(JSON.stringify({ meta: result }));
-      } catch (err) { res.end(JSON.stringify({ meta: {} })); }
-    })();
-    return;
-  }
+    // 4. Stream (Video Linki)
+    if (url.includes('/stream/movie/')) {
+      const id = url.split('/').pop().replace('.json', '');
+      const results = await client.invokeMethod('stream.find', { 
+        query: { porn_id: id } 
+      });
+      return res.end(JSON.stringify({ streams: results || [] }));
+    }
 
-  // 4. STREAM (VİDEO LİNKİ) İSTEĞİ
-  if (url.includes('/stream/movie/')) {
-    _asyncToGenerator(function* () {
-      try {
-        const id = url.split('/').pop().replace('.json', '');
-        const results = yield client.invokeMethod('stream.find', { query: { porn_id: id } });
-        res.end(JSON.stringify({ streams: results || [] }));
-      } catch (err) { res.end(JSON.stringify({ streams: [] })); }
-    })();
-    return;
-  }
-
-  // Statik dosyalar için (logo vb.)
-  (0, _serveStatic.default)('static')(req, res, () => {
+    // Bilinmeyen istek
     res.writeHead(404);
-    res.end();
-  });
+    res.end(JSON.stringify({ error: "Not Found" }));
+
+  } catch (err) {
+    console.error("Hata Oluştu:", err.message);
+    res.end(JSON.stringify({ metas: [], streams: [], error: err.message }));
+  }
 });
 
-server.listen(PORT, () => console.log(`Nuvio Bridge Active on ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Nuvio Standalone Server: http://localhost:${PORT}`);
+});
