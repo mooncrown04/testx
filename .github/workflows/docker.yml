@@ -16,6 +16,27 @@ jobs:
       - name: Repo'yu çek
         uses: actions/checkout@v4
       
+      - name: manifest.json oluştur
+        run: |
+          cat > manifest.json << 'EOF'
+          {
+            "id": "stremio_porn",
+            "version": "0.0.4",
+            "name": "Stremio Porn",
+            "description": "Stremio addon that provides videos and webcam streams from various porn sites",
+            "types": ["movie"],
+            "idPrefixes": ["tt"],
+            "catalogs": [],
+            "resources": ["stream", "meta"],
+            "icon": "https://raw.githubusercontent.com/naughty-doge/stremio-porn/master/static/logo.png",
+            "logo": "https://raw.githubusercontent.com/naughty-doge/stremio-porn/master/static/logo.png",
+            "background": "https://raw.githubusercontent.com/naughty-doge/stremio-porn/master/static/background.jpg",
+            "contactEmail": "naughty-doge@protonmail.com"
+          }
+          EOF
+          echo "✅ manifest.json oluşturuldu"
+          cat manifest.json
+      
       - name: Dockerfile oluştur
         run: |
           cat > Dockerfile << 'EOF'
@@ -25,7 +46,9 @@ jobs:
           RUN npm install --production
           COPY dist/ ./dist/
           COPY static/ ./static/
+          COPY manifest.json ./manifest.json
           EXPOSE 80
+          ENV NODE_ENV=production
           CMD ["node", "dist/index.js"]
           EOF
           echo "✅ Dockerfile oluşturuldu"
@@ -42,22 +65,24 @@ jobs:
           .idea
           coverage
           *.log
+          src
+          tests
+          .eslintrc.json
+          .babelrc
+          README.md
           EOF
           echo "✅ .dockerignore oluşturuldu"
       
       - name: Dosyaları kontrol et
         run: |
-          echo "=== Dockerfile ==="
-          cat Dockerfile
-          echo ""
-          echo "=== .dockerignore ==="
-          cat .dockerignore
+          echo "=== manifest.json ==="
+          cat manifest.json
           echo ""
           echo "=== dist/ var mı? ==="
-          ls -la dist/ || echo "❌ dist yok!"
+          ls -la dist/ 2>/dev/null || echo "❌ dist yok!"
           echo ""
           echo "=== static/ var mı? ==="
-          ls -la static/ || echo "❌ static yok!"
+          ls -la static/ 2>/dev/null || echo "❌ static yok!"
       
       - name: GHCR'ye giriş yap
         uses: docker/login-action@v3
@@ -73,8 +98,20 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/stremio-porn:latest
       
+      - name: manifest.json'u repo'ya kaydet (isteğe bağlı)
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add manifest.json
+          git diff --staged --quiet || git commit -m "Auto-generate manifest.json"
+          git push || echo "Değişiklik yok veya push hatası"
+      
       - name: Başarı mesajı
         run: |
           echo "✅ Build tamamlandı!"
-          echo "İndirmek için:"
+          echo ""
+          echo "📦 İndirmek için:"
           echo "docker pull ghcr.io/${{ github.repository_owner }}/stremio-porn:latest"
+          echo ""
+          echo "🚀 Çalıştırmak için:"
+          echo "docker run -p 80:80 ghcr.io/${{ github.repository_owner }}/stremio-porn:latest"
