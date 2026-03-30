@@ -5,24 +5,25 @@ const cheerio = require('cheerio');
 const BASE_URL = 'https://chaturbate.com';
 const GET_STREAM_URL = 'https://chaturbate.com/get_edge_hls_url_ajax/';
 
+// NUVIO İÇİN ÖZEL AYARLANMIŞ MANIFEST
 const manifest = {
     id: "org.sinewix.chaturbate",
     version: "1.1.0",
     name: "Sinewix Chaturbate",
-    description: "Chaturbate Canli Yayin Eklentisi",
-    // Nuvio'nun kataloğu tanıması için resources bu formatta olmalı
+    description: "Canli Yayin Portali",
+    // Resources kısmı Nuvio'da katalog tetiklemek için kritik
     resources: [
-        { name: "catalog", types: ["movie", "series"], idPrefixes: ["cb_"] },
-        { name: "meta", types: ["movie", "series"], idPrefixes: ["cb_"] },
-        { name: "stream", types: ["movie", "series"], idPrefixes: ["cb_"] }
+        { name: "catalog", types: ["movie"], idPrefixes: ["cb_"] },
+        { name: "meta", types: ["movie"], idPrefixes: ["cb_"] },
+        { name: "stream", types: ["movie"], idPrefixes: ["cb_"] }
     ],
-    types: ["movie", "series"],
+    types: ["movie"],
     idPrefixes: ["cb_"],
     catalogs: [
         {
-            type: "movie", // Nuvio ana sayfa için movie şart
-            id: "cb_catalog",
-            name: "Sinewix: Chaturbate Canli",
+            type: "movie",
+            id: "sinewix_cb_catalog", // ID ismini Nuvio'nun seveceği şekilde güncelledik
+            name: "Sinewix Chaturbate",
             extra: [
                 { name: "search", isRequired: false },
                 { name: "skip", isRequired: false }
@@ -31,27 +32,29 @@ const manifest = {
     ],
     behaviorHints: {
         adult: true,
-        configurable: false
+        configurable: false,
+        configurationRequired: false
     }
 };
 
 const builder = new addonBuilder(manifest);
 
-// KATALOG ÇEKME MANTIĞI
+// KATALOG ÇEKİCİ
 builder.defineCatalogHandler(async (args) => {
-    if (args.id !== 'cb_catalog') return { metas: [] };
+    // Nuvio bazen id'yi boş gönderebilir, o yüzden sadece tip kontrolü yapıyoruz
+    if (args.type !== 'movie') return { metas: [] };
 
     try {
-        const skip = args.extra && args.extra.skip ? args.extra.skip : 0;
+        const skip = args.extra?.skip || 0;
         const page = Math.floor(skip / 12) + 1;
         
-        let url = args.extra && args.extra.search 
+        let url = args.extra?.search 
             ? `${BASE_URL}/?keywords=${encodeURIComponent(args.extra.search)}&page=${page}`
             : `${BASE_URL}/?page=${page}`;
 
         const response = await axios.get(url, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-            timeout: 10000
+            timeout: 8000
         });
 
         const $ = cheerio.load(response.data);
@@ -70,19 +73,18 @@ builder.defineCatalogHandler(async (args) => {
                     poster: img,
                     posterShape: 'landscape',
                     background: img,
-                    description: `${viewers} izleyici şu an canlı yayında.`
+                    description: `Canli: ${viewers}`
                 });
             }
         });
 
-        return { metas: metas };
+        return { metas };
     } catch (err) {
-        console.error("Katalog Hatası:", err.message);
         return { metas: [] };
     }
 });
 
-// META BİLGİSİ
+// META HANDLER
 builder.defineMetaHandler(async (args) => {
     const user = args.id.replace('cb_', '');
     return {
@@ -92,12 +94,13 @@ builder.defineMetaHandler(async (args) => {
             name: user,
             posterShape: 'landscape',
             background: `https://room-images.chaturbate.com/room-image/${user}.jpg`,
-            description: "Canlı yayını izlemek için oynat tuşuna basın."
+            logo: `https://room-images.chaturbate.com/room-image/${user}.jpg`,
+            description: "Canli Yayini Baslat"
         }
     };
 });
 
-// YAYIN LİNKİ (STREAM)
+// STREAM HANDLER
 builder.defineStreamHandler(async (args) => {
     const user = args.id.replace('cb_', '');
     try {
@@ -112,19 +115,15 @@ builder.defineStreamHandler(async (args) => {
 
         if (res.data && res.data.success) {
             return {
-                streams: [
-                    {
-                        name: 'Sinewix HD',
-                        title: 'Canli Yayini Baslat',
-                        url: res.data.url,
-                        live: true
-                    }
-                ]
+                streams: [{
+                    name: 'Sinewix HD',
+                    title: 'Izle',
+                    url: res.data.url,
+                    live: true
+                }]
             };
         }
-    } catch (e) {
-        console.error("Yayın çekilemedi.");
-    }
+    } catch (e) {}
     return { streams: [] };
 });
 
